@@ -1,13 +1,9 @@
 import React, { useState, useEffect } from "react";
-import {
-  getBraintreeClientToken,
-  processPayment,
-  createOrder
-} from "./apiCore";
+import { createOrder, getAddress, read } from "./apiCore";
 import { emptyCart } from "./cartHelpers";
 import { isAuthenticated } from "../auth";
 import { Link } from "react-router-dom";
-import DropIn from "braintree-web-drop-in-react";
+import { API, RAZORPAY } from "../config";
 
 const Checkout = ({ products, setRun = (f) => f, run = undefined }) => {
   const [data, setData] = useState({
@@ -15,32 +11,17 @@ const Checkout = ({ products, setRun = (f) => f, run = undefined }) => {
     success: false,
     clientToken: null,
     error: "",
-    instance: {},
-    address: ""
+    instance: {}
   });
+
+  useEffect(() => {
+    getAddress();
+  }, []);
+
+  const [address, setAddress] = useState("");
 
   const userId = isAuthenticated() && isAuthenticated().user._id;
   const token = isAuthenticated() && isAuthenticated().token;
-
-  const getToken = (userId, token) => {
-    getBraintreeClientToken(userId, token).then((data) => {
-      if (data.error) {
-        console.log(data.error);
-        setData({ ...data, error: data.error });
-      } else {
-        console.log(data);
-        setData({ clientToken: data.clientToken });
-      }
-    });
-  };
-
-  useEffect(() => {
-    getToken(userId, token);
-  }, []);
-
-  const handleAddress = (event) => {
-    setData({ ...data, address: event.target.value });
-  };
 
   const getTotal = () => {
     return products.reduce((currentValue, nextValue) => {
@@ -50,109 +31,17 @@ const Checkout = ({ products, setRun = (f) => f, run = undefined }) => {
 
   const showCheckout = () => {
     return isAuthenticated() ? (
-      <div>{showDropIn()}</div>
+      <div>
+        <button className='btn btn-success' onClick={paymentHandler}>
+          Pay Now
+        </button>
+      </div>
     ) : (
       <Link to='/signin'>
         <button className='btn btn-primary'>Sign in to checkout</button>
       </Link>
     );
   };
-
-  let deliveryAddress = data.address;
-
-  const buy = () => {
-    setData({ loading: true });
-    // send the nonce to your server
-    // nonce = data.instance.requestPaymentMethod()
-    let nonce;
-    let getNonce = data.instance
-      .requestPaymentMethod()
-      .then((data) => {
-        // console.log(data);
-        nonce = data.nonce;
-        // once you have nonce (card type, card number) send nonce as 'paymentMethodNonce'
-        // and also total to be charged
-        // console.log(
-        //     "send nonce and total to process: ",
-        //     nonce,
-        //     getTotal(products)
-        // );
-        const paymentData = {
-          paymentMethodNonce: nonce,
-          amount: getTotal(products)
-        };
-
-        processPayment(userId, token, paymentData)
-          .then((response) => {
-            console.log(response);
-            // empty cart
-            // create order
-
-            const createOrderData = {
-              products: products,
-              transaction_id: response.transaction.id,
-              amount: response.transaction.amount,
-              address: deliveryAddress
-            };
-
-            createOrder(userId, token, createOrderData)
-              .then((response) => {
-                emptyCart(() => {
-                  setRun(!run); // run useEffect in parent Cart
-                  console.log("payment success and empty cart");
-                  setData({
-                    loading: false,
-                    success: true
-                  });
-                });
-              })
-              .catch((error) => {
-                console.log(error);
-                setData({ loading: false });
-              });
-          })
-          .catch((error) => {
-            console.log(error);
-            setData({ loading: false });
-          });
-      })
-      .catch((error) => {
-        // console.log("dropin error: ", error);
-        setData({ ...data, error: error.message });
-      });
-  };
-
-  const showDropIn = () => (
-    <div onBlur={() => setData({ ...data, error: "" })}>
-      {data.clientToken !== null && products.length > 0 ? (
-        <div>
-          <div className='gorm-group mb-3'>
-            <label className='text-muted'>Delivery address:</label>
-            <textarea
-              onChange={handleAddress}
-              className='form-control'
-              value={data.address}
-              placeholder='Please must fill full addres and phone number'
-              required
-            />
-          </div>
-
-          <DropIn
-            options={{
-              authorization: data.clientToken,
-              paypal: {
-                flow: "vault"
-              }
-            }}
-            onInstance={(instance) => (data.instance = instance)}
-          />
-          <button onClick={buy} className='btn btn-success btn-block'>
-            Pay
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
 
   const showError = (error) => (
     <div
@@ -172,16 +61,116 @@ const Checkout = ({ products, setRun = (f) => f, run = undefined }) => {
     </div>
   );
 
+  const paymentHandler = async (e) => {
+    e.preventDefault();
+    const paymentData = {
+      amount: getTotal(products)
+    };
+
+    const data = await fetch(`${API}/razorpay/createorder/${userId}`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(paymentData)
+    }).then((t) => t.json());
+
+    const options = {
+      key: RAZORPAY,
+      currency: "INR",
+      amount: getTotal(products) * 100,
+      order_id: data.id,
+      name: "Payment",
+      handler: async (response) => {
+        const result = await fetch(
+          `${API}/razorpay/success/${response.razorpay_payment_id}/${response.razorpay_order_id}/${response.razorpay_signature}`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+        const createOrderData = {
+          products: products
+        };
+
+        createOrder(userId, token, createOrderData)
+          .then((response) => {
+            emptyCart(() => {
+              setRun(!run);
+              console.log("payment success and empty cart");
+              setData({
+                loading: false,
+                success: true
+              });
+            });
+          })
+          .catch((error) => {
+            console.log(error);
+            setData({ loading: false });
+          });
+      }
+    };
+    const paymentObject = new window.Razorpay(options);
+    paymentObject.open();
+  };
+
   const showLoading = (loading) =>
     loading && <h2 className='text-danger'>Loading...</h2>;
 
+  var add = "";
+
+  const getAddress = () => {
+    return fetch(`${API}/user/getaddress`, {
+      method: "GET"
+    })
+      .then((res) => res.json())
+      .then((out) => {
+        for (let index = 0; index < out.length; index++) {
+          if (out[index].user == userId) {
+            add =
+              "NAME: " +
+              out[index].name +
+              ", ADDRESS: " +
+              out[index].address +
+              ", FLAT_NO: " +
+              out[index].flatno +
+              ", PINCODE: " +
+              out[index].pincode +
+              ", PHONENUM: " +
+              out[index].phonenumber;
+          }
+          console.log(add);
+          setAddress(add);
+        }
+      })
+      .catch((err) => {
+        throw err;
+      });
+  };
+
   return (
     <div>
-      <h2>Total: ${getTotal()}</h2>
+      <h2>Total: ₹ {getTotal()}</h2>
       {showLoading(data.loading)}
       {showSuccess(data.success)}
       {showError(data.error)}
-      {showCheckout()}
+      {getTotal(products) > 0 && address != "" ? showCheckout() : ""}
+      <h6>{JSON.stringify(address)}</h6>
+      {address == "" ? (
+        <Link className='nav-link' to='/user/address'>
+          Click here to add address
+        </Link>
+      ) : (
+        <Link className='nav-link' to='/user/address'>
+          Click here to Change address
+        </Link>
+      )}
     </div>
   );
 };

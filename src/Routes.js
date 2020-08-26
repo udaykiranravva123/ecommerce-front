@@ -19,6 +19,7 @@ import UpdateProduct from "./admin/UpdateProduct";
 import UpdateCategory from "./admin/updateCategory";
 import ForgotPassword from "./user/ForgetPassword";
 import ResetPassword from "./user/ResetPassword";
+import Address from "./core/Address";
 
 const Routes = () => {
   return (
@@ -37,6 +38,7 @@ const Routes = () => {
         <AdminRoute path='/admin/orders' exact component={Orders} />
         <PrivateRoute path='/profile/:userId' exact component={Profile} />
         <PrivateRoute path='/admin/products' exact component={ManageProducts} />
+        <PrivateRoute path='/user/address' exact component={Address} />
         <AdminRoute
           path='/admin/product/update/:productId'
           exact
