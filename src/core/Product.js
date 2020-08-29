@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import Layout from "./Layout";
 import { read, listRelated } from "./apiCore";
 import Card from "./Card";
+import DisqusThread from "./DisqusThread";
 
 const Product = (props) => {
   const [product, setProduct] = useState({});
@@ -31,6 +32,15 @@ const Product = (props) => {
     loadSingleProduct(productId);
   }, [props]);
 
+  const showComments = () => {
+    const productId = props.match.params.productId;
+    return (
+      <div>
+        <DisqusThread id={productId} path={`/product/${productId}`} />
+      </div>
+    );
+  };
+
   return (
     <Layout
       title={product && product.name}
@@ -55,6 +65,7 @@ const Product = (props) => {
           ))}
         </div>
       </div>
+      <div className='container'>{showComments()}</div>
     </Layout>
   );
 };
